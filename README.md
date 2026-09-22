@@ -155,9 +155,31 @@ The app accepts both formats from `GET http://192.168.4.1/api/data`:
 ### Steps
 
 ```bash
-cd farmtrace
+cd farmtrace-fixed
 npm install
 npx react-native run-android
+```
+
+### Unable to Load Script
+
+Debug builds load JavaScript from Metro. Keep Metro running in a separate terminal:
+
+```bash
+cd farmtrace-fixed
+npm start -- --reset-cache
+```
+
+For a USB-connected device, forward the Metro port before reloading the app:
+
+```bash
+adb reverse tcp:8081 tcp:8081
+```
+
+For a standalone install, build and install the release variant instead. Release builds embed the JavaScript bundle and do not require Metro:
+
+```bash
+cd android
+gradlew.bat assembleRelease
 ```
 
 ---
