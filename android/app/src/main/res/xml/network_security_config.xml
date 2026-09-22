@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config for FarmTrace
+  Allows cleartext HTTP to NodeMCU local AP (192.168.4.x) and development server.
+  All other traffic uses default security (HTTPS).
+-->
+<network-security-config>
+    <!-- NodeMCU local AP — always HTTP, no internet -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.4.1</domain>
+    </domain-config>
+
+    <!-- Android emulator backend (10.0.2.2 = host machine localhost) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- Local development — any 192.168.x.x -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">192.168.0.0</domain>
+    </domain-config>
+
+    <!-- Default: enforce HTTPS for all other connections -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
