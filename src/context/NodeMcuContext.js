@@ -17,6 +17,15 @@ import React, {
   useRef,
   useCallback,
 } from 'react';
+import { io } from 'socket.io-client';
+//
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import { Config } from '../config';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -68,6 +77,7 @@ export const NodeMcuProvider = ({ children }) => {
   const [debugLog, setDebugLog] = useState([]);
 
   const pollTimer = useRef(null);
+  const socketRef = useRef(null);
   const ageTimer = useRef(null);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -165,6 +175,28 @@ export const NodeMcuProvider = ({ children }) => {
     }, 1000);
     return () => clearInterval(ageTimer.current);
   }, []);
+
+  // ── Socket.IO Connection ──────────────────────────────────────────────────
+  useEffect(() => {
+    const socket = io(Config.API_BASE.replace('/api', ''), { reconnectionAttempts: 10, reconnectionDelay: 2000 });
+    socketRef.current = socket;
+    
+    socket.on('connect', () => updateStatus({ nodemcuApi: 'CONNECTED' }));
+    socket.on('disconnect', () => updateStatus({ nodemcuApi: 'DISCONNECTED' }));
+    socket.on('connect_error', () => updateStatus({ nodemcuApi: 'ERROR', lastError: 'Socket connection failed' }));
+    
+    socket.on('farmtrace:driver:data', (data) => {
+      setSensorData(prev => ({ ...prev, ...data, dataAge: 0 }));
+      updateStatus(prev => ({ lastSuccess: new Date(), packetCount: prev.packetCount + 1 }));
+    });
+    
+    socket.on('farmtrace:container:data', (data) => {
+      setSensorData(prev => ({ ...prev, ...data, dataAge: 0 }));
+      updateStatus(prev => ({ lastSuccess: new Date(), packetCount: prev.packetCount + 1 }));
+    });
+    
+    return () => socket.disconnect();
+  }, [updateStatus]);
 
   // ── Start / Stop polling ──────────────────────────────────────────────────
 

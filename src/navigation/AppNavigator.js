@@ -11,6 +11,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme/colors';
 
 import DashboardScreen from '../screens/DashboardScreen';
+import LoadConfigScreen from '../screens/LoadConfigScreen';
+import NetworkTelemetryScreen from '../screens/NetworkTelemetryScreen';
+import LiveLoadTestingScreen from '../screens/LiveLoadTestingScreen';
+import HardwareDevicesScreen from '../screens/HardwareDevicesScreen';
 import MonitorScreen from '../screens/MonitorScreen';
 import NodeMcuScreen from '../screens/NodeMcuScreen';
 import LogbookScreen from '../screens/LogbookScreen';
@@ -24,6 +28,10 @@ const TabIcon = ({ emoji, color }) => (
 );
 
 const ICONS = {
+  LoadConfig: '⚙️',
+  Network: '📶',
+  LoadTest: '🧪',
+  Hardware: '💻',
   Home: '🏠',
   Monitor: '📊',
   Gateway: '📡',
@@ -74,6 +82,10 @@ const AppNavigator = () => {
       <Tab.Screen name="Logbook" component={LogbookScreen}   options={{ title: 'Logbook' }} />
       <Tab.Screen name="Trips"   component={TripScreen}      options={{ title: 'Trips' }} />
       <Tab.Screen name="Profile" component={ProfileScreen}   options={{ title: 'Profile' }} />
+      <Tab.Screen name="LoadConfig" component={LoadConfigScreen} options={{ title: 'Config' }} />
+      <Tab.Screen name="Network" component={NetworkTelemetryScreen} options={{ title: 'Network' }} />
+      <Tab.Screen name="LoadTest" component={LiveLoadTestingScreen} options={{ title: 'Testing' }} />
+      <Tab.Screen name="Hardware" component={HardwareDevicesScreen} options={{ title: 'Hardware' }} />
     </Tab.Navigator>
   );
 };
