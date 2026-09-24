@@ -1,10 +1,12 @@
 /**
  * NodeMcuContext
  * ─────────────────────────────────────────────────────────────────────────────
- * Manages the live connection to the NodeMCU local Wi-Fi API.
+ * Manages the live connection to the backend via Socket.IO and
+ * falls back to NodeMCU local Wi-Fi API polling.
  *
  * Architecture:
- *   NodeMCU AP (192.168.4.1) → phone polling → this context → all screens
+ *   Hardware → MQTT → Backend (Socket.IO) → this context → all screens
+ *   Fallback: NodeMCU AP (192.168.4.1) → phone polling → this context
  *
  * Connection states: DISCONNECTED | CONNECTING | CONNECTED | ERROR
  */
@@ -18,14 +20,6 @@ import React, {
   useCallback,
 } from 'react';
 import { io } from 'socket.io-client';
-//
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-} from 'react';
 import { Config } from '../config';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -88,10 +82,10 @@ export const NodeMcuProvider = ({ children }) => {
   }, []);
 
   const updateStatus = useCallback((patch) => {
-    setStatus(prev => ({ ...prev, ...patch }));
+    setStatus(prev => ({ ...prev, ...(typeof patch === 'function' ? patch(prev) : patch) }));
   }, []);
 
-  // ── Fetch one sensor packet from NodeMCU ──────────────────────────────────
+  // ── Fetch one sensor packet from NodeMCU (fallback) ────────────────────────
 
   const fetchOnce = useCallback(async () => {
     const url = `http://${Config.NODEMCU_IP}:${Config.NODEMCU_PORT}/api/data`;
@@ -106,11 +100,8 @@ export const NodeMcuProvider = ({ children }) => {
       const raw = await res.json();
 
       // Support both flat and nested NodeMCU JSON formats
-      // Flat:   { temperature, humidity, mq6, mq3, accelX … }
-      // Nested: { container: { temperature … }, driver: { mq3 … motion: { accelX … } } }
       let parsed;
       if (raw.container && raw.driver) {
-        // nested format
         const { container, driver } = raw;
         const motion = driver.motion || {};
         parsed = {
@@ -128,7 +119,6 @@ export const NodeMcuProvider = ({ children }) => {
           sequence:    container.sequence    ?? null,
         };
       } else {
-        // flat format (current firmware)
         parsed = {
           temperature: raw.temperature ?? null,
           humidity:    raw.humidity    ?? null,
@@ -147,12 +137,12 @@ export const NodeMcuProvider = ({ children }) => {
 
       parsed.dataAge = 0;
       setSensorData(parsed);
-      updateStatus(prev => ({
+      updateStatus({
         nodemcuApi: 'CONNECTED',
         lastError: null,
         lastSuccess: new Date(),
-        packetCount: (prev?.packetCount ?? 0) + 1,
-      }));
+        packetCount: (status.packetCount ?? 0) + 1,
+      });
       addDebugLog(`OK — temp=${parsed.temperature} hum=${parsed.humidity} mq6=${parsed.mq6}`);
     } catch (err) {
       clearTimeout(tid);
@@ -162,51 +152,102 @@ export const NodeMcuProvider = ({ children }) => {
       updateStatus({ nodemcuApi: 'ERROR', lastError: msg });
       addDebugLog(`FAIL — ${msg}`);
     }
-  }, [addDebugLog, updateStatus]);
+  }, [addDebugLog, updateStatus, status.packetCount]);
 
   // ── Data-age ticker (updates every second) ────────────────────────────────
 
   useEffect(() => {
     ageTimer.current = setInterval(() => {
       setSensorData(prev => {
-        if (!prev.timestamp || !prev.dataAge === undefined) return prev;
+        if (!prev.timestamp || prev.dataAge === undefined) return prev;
         return { ...prev, dataAge: (prev.dataAge ?? 0) + 1 };
       });
     }, 1000);
     return () => clearInterval(ageTimer.current);
   }, []);
 
-  // ── Socket.IO Connection ──────────────────────────────────────────────────
-  useEffect(() => {
-    const socket = io(Config.API_BASE.replace('/api', ''), { reconnectionAttempts: 10, reconnectionDelay: 2000 });
-    socketRef.current = socket;
-    
-    socket.on('connect', () => updateStatus({ nodemcuApi: 'CONNECTED' }));
-    socket.on('disconnect', () => updateStatus({ nodemcuApi: 'DISCONNECTED' }));
-    socket.on('connect_error', () => updateStatus({ nodemcuApi: 'ERROR', lastError: 'Socket connection failed' }));
-    
-    socket.on('farmtrace:driver:data', (data) => {
-      setSensorData(prev => ({ ...prev, ...data, dataAge: 0 }));
-      updateStatus(prev => ({ lastSuccess: new Date(), packetCount: prev.packetCount + 1 }));
-    });
-    
-    socket.on('farmtrace:container:data', (data) => {
-      setSensorData(prev => ({ ...prev, ...data, dataAge: 0 }));
-      updateStatus(prev => ({ lastSuccess: new Date(), packetCount: prev.packetCount + 1 }));
-    });
-    
-    return () => socket.disconnect();
-  }, [updateStatus]);
+  // ── Socket.IO Connection (same pipeline as the website) ───────────────────
 
-  // ── Start / Stop polling ──────────────────────────────────────────────────
+  useEffect(() => {
+    const socketUrl = Config.API_BASE.replace('/api', '');
+    const socket = io(socketUrl, {
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      transports: ['websocket', 'polling'],
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      updateStatus({ nodemcuApi: 'CONNECTED', lastError: null });
+      addDebugLog(`Socket connected (${socket.id})`);
+    });
+
+    socket.on('disconnect', () => {
+      updateStatus({ nodemcuApi: 'DISCONNECTED' });
+      addDebugLog('Socket disconnected');
+    });
+
+    socket.on('connect_error', (err) => {
+      updateStatus({ nodemcuApi: 'ERROR', lastError: 'Socket connection failed' });
+      addDebugLog(`Socket error: ${err.message}`);
+    });
+
+    socket.on('farmtrace:driver:data', (data) => {
+      const parsed = {
+        mq3:    data.mq3    ?? null,
+        accelX: data.motion?.x ?? data.accelX ?? null,
+        accelY: data.motion?.y ?? data.accelY ?? null,
+        accelZ: data.motion?.z ?? data.accelZ ?? null,
+        gyroX:  data.gyro?.x  ?? data.gyroX  ?? null,
+        gyroY:  data.gyro?.y  ?? data.gyroY  ?? null,
+        gyroZ:  data.gyro?.z  ?? data.gyroZ  ?? null,
+        timestamp: data.timestamp ?? Date.now(),
+        dataAge: 0,
+      };
+      setSensorData(prev => ({ ...prev, ...parsed }));
+      updateStatus({
+        nodemcuApi: 'CONNECTED',
+        lastSuccess: new Date(),
+      });
+      addDebugLog(`Driver pkt — MQ3: ${parsed.mq3}`);
+    });
+
+    socket.on('farmtrace:container:data', (data) => {
+      const parsed = {
+        temperature: data.temperature ?? null,
+        humidity:    data.humidity    ?? null,
+        mq6:         data.mq6         ?? null,
+        sequence:    data.sequence    ?? null,
+        timestamp:   data.timestamp   ?? Date.now(),
+        dataAge: 0,
+      };
+      setSensorData(prev => ({ ...prev, ...parsed }));
+      updateStatus({
+        nodemcuApi: 'CONNECTED',
+        lastSuccess: new Date(),
+      });
+      addDebugLog(`Container pkt — Seq: ${parsed.sequence}, Temp: ${parsed.temperature}°C`);
+    });
+
+    socket.on('farmtrace:status', (s) => {
+      addDebugLog(`Status: ${JSON.stringify(s)}`);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Start / Stop polling (fallback for local NodeMCU AP) ──────────────────
 
   const startPolling = useCallback(() => {
-    if (pollTimer.current) return; // already running
+    if (pollTimer.current) return;
     setIsPolling(true);
     updateStatus({ nodemcuApi: 'CONNECTING' });
     addDebugLog('Starting NodeMCU poll…');
 
-    fetchOnce(); // immediate first fetch
+    fetchOnce();
     pollTimer.current = setInterval(fetchOnce, Config.NODEMCU_POLL_INTERVAL_MS);
   }, [fetchOnce, addDebugLog, updateStatus]);
 
@@ -244,6 +285,7 @@ export const NodeMcuProvider = ({ children }) => {
         startPolling,
         stopPolling,
         refresh,
+        socket: socketRef.current,
       }}
     >
       {children}
