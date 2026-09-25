@@ -1,25 +1,23 @@
 /**
  * FarmTrace App
- * Root component — wraps navigation in context providers.
+ * Root component — wraps navigation in MQTT context provider.
+ * Connects directly to broker.emqx.io via WebSocket.
  */
 
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
-import { NodeMcuProvider } from './src/context/NodeMcuContext';
-import { TripProvider } from './src/context/TripContext';
+import { MqttProvider } from './src/context/MqttContext';
 
 function App(): React.JSX.Element {
   return (
     <SafeAreaProvider>
-      <NodeMcuProvider>
-        <TripProvider>
-          <NavigationContainer>
-            <AppNavigator />
-          </NavigationContainer>
-        </TripProvider>
-      </NodeMcuProvider>
+      <MqttProvider>
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </MqttProvider>
     </SafeAreaProvider>
   );
 }
